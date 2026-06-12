@@ -107,6 +107,32 @@ tbody tr.cli-row:hover td:first-child{box-shadow:inset 3px 0 0 var(--gold-2)}
 .note{color:var(--muted2);font-size:12px;margin-top:14px;line-height:1.55}
 /* accordion inline */
 .ped-tag{font-family:'Manrope';font-weight:700;font-size:12.5px;color:var(--teal);background:var(--surface2);border:1px solid var(--line);border-radius:7px;padding:3px 9px;white-space:nowrap}
+/* saúde do cliente */
+.hdot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;flex:0 0 auto;vertical-align:middle}
+.hdot-green{background:var(--green);box-shadow:0 0 7px rgba(127,201,154,.6)}
+.hdot-amber{background:var(--amber);box-shadow:0 0 7px rgba(230,185,95,.6)}
+.hdot-red{background:var(--rose);box-shadow:0 0 8px rgba(224,139,122,.7)}
+.cli-cell{display:flex;align-items:center}
+.hbadge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:4px 10px;border-radius:999px;margin-right:10px}
+.hbadge .hdot{margin-right:0;width:8px;height:8px}
+.hbadge-green{background:rgba(127,201,154,.15);color:var(--green)}
+.hbadge-amber{background:rgba(230,185,95,.15);color:var(--amber)}
+.hbadge-red{background:rgba(224,139,122,.16);color:var(--rose)}
+/* motivos recorrentes (chips) */
+.mot-chips{display:flex;flex-wrap:wrap;gap:7px;margin:2px 0 11px}
+.mot-chip{font-size:11.5px;font-weight:600;padding:4px 10px;border-radius:999px;border:1px solid var(--line2)}
+.mot-chip b{font-weight:800}
+.mot-chip.re{background:rgba(224,139,122,.1);color:#e8a596;border-color:rgba(224,139,122,.3)}
+.mot-chip.sac{background:rgba(91,183,168,.1);color:var(--teal);border-color:rgba(91,183,168,.3)}
+/* aviso de atualização piscando sutil */
+.upd-nag{display:flex;align-items:center;gap:10px;margin:16px 0 0;padding:11px 15px;border-radius:12px;font-size:12.5px;line-height:1.45;color:var(--muted);background:var(--gold-dim);border:1px solid var(--line2);animation:nagPulse 2.8s ease-in-out infinite}
+.upd-nag.warn{color:#e6b95f;background:rgba(230,185,95,.1);border-color:rgba(230,185,95,.42)}
+.upd-nag b{color:var(--gold);font-weight:700}.upd-nag.warn b{color:#efc874}
+.nag-dot{width:8px;height:8px;border-radius:50%;background:var(--gold);flex:0 0 auto;animation:nagDot 2s ease-in-out infinite}
+.upd-nag.warn .nag-dot{background:var(--amber)}
+body.empty .upd-nag{display:none}
+@keyframes nagPulse{0%,100%{opacity:.72}50%{opacity:1}}
+@keyframes nagDot{0%,100%{box-shadow:0 0 0 0 rgba(230,185,95,.5)}50%{box-shadow:0 0 0 6px rgba(230,185,95,0)}}
 .cli-cell{margin-bottom:9px}
 .see-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-family:'Manrope';font-weight:700;font-size:11.5px;color:var(--gold);background:var(--gold-dim);border:1px solid var(--gold-2);border-radius:999px;padding:6px 12px;cursor:pointer;transition:.15s;white-space:nowrap}
 .see-btn:hover{background:linear-gradient(145deg,var(--gold),var(--gold-2));color:#1a130a}
@@ -235,6 +261,8 @@ body.empty .empty-ov{display:flex}
     </div>
   </div>
 
+  <div class="upd-nag" id="updNag"></div>
+
   <div class="empty-ov" id="emptyOv">
     <div class="eo-card">
       <div class="eo-icon">
@@ -323,6 +351,27 @@ function computeRows(){
   return rows;
 }
 
+/* ---- saúde do cliente (combina reentregas + SAC + potencial) ---- */
+function health(r){
+  const nSac=resolveSac(r.p.k).length, nRe=r.nRe;
+  const potHigh=r.fatAll>=60000, potMid=r.fatAll>=15000;
+  let pts=0;
+  if(nRe>=THR) pts+=2; else if(nRe>0) pts+=1;
+  if(nSac>=4) pts+=2; else if(nSac>=1) pts+=1;
+  const critical = pts>=4 || nSac>=5 || nRe>=THR*2 || (nRe>=THR && (potHigh||potMid));
+  let level,label;
+  if(critical){ level='red'; label='Atenção máxima'; }
+  else if(pts>=2 || (pts>=1 && potHigh)){ level='amber'; label='Atenção'; }
+  else if(pts>=1){ level='amber'; label='Acompanhar'; }
+  else { level='green'; label='Tranquilo'; }
+  return {level,label,nSac,nRe};
+}
+function tally(arr){ const m={}; arr.forEach(x=>{ const k=(x||'').toString().trim()||'—'; m[k]=(m[k]||0)+1; }); return Object.entries(m).sort((a,b)=>b[1]-a[1]); }
+function motivoChips(pairs, cls){
+  if(!pairs.length) return '';
+  return `<div class="mot-chips">`+pairs.map(([k,n])=>`<span class="mot-chip ${cls}">${k} <b>×${n}</b></span>`).join('')+`</div>`;
+}
+
 /* ---- render ---- */
 function render(){
   setEmpty(!hasData());
@@ -360,8 +409,9 @@ function render(){
   const trs=rows.map(r=>{
     const badge=r.nRe>=THR?`<span class="badge alert">${r.nRe}</span>`:(r.nRe>0?`<span class="badge warn">${r.nRe}</span>`:`<span class="badge ok">0</span>`);
     const open=OPEN.has(r.p.k);
+    const hl=health(r);
     return `<tr class="cli-row ${open?'open':''}" data-k="${r.p.k.replace(/"/g,'&quot;')}">
-      <td data-l="Cliente"><div class="cli-cell">${r.p.n}</div><button class="see-btn ${open?'on':''}" onclick="toggleCli('${r.p.k.replace(/'/g,"\\'")}',event)"><svg class="see-cr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg><span class="see-tx">${open?'Ocultar análise':'Ver análise'}</span></button></td>
+      <td data-l="Cliente"><div class="cli-cell"><span class="hdot hdot-${hl.level}" title="${hl.label}"></span>${r.p.n}</div><button class="see-btn ${open?'on':''}" onclick="toggleCli('${r.p.k.replace(/'/g,"\\'")}',event)"><svg class="see-cr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg><span class="see-tx">${open?'Ocultar análise':'Ver análise'}</span></button></td>
       <td data-l="Pedido"><span class="ped-tag">${r.p.ped||'—'}</span></td>
       <td data-l="Representante">${r.p.rep}</td>
       <td data-l="Valor pedido" class="val-c">R$ ${BRL2.format(r.p.valor)}</td>
@@ -395,7 +445,9 @@ function detailHTML(r){
   const list=r.reList.slice().sort((a,b)=>b[0].localeCompare(a[0]));
   const rows=list.map(o=>`<tr><td data-l="Data">${o[0]?o[0].split('-').reverse().join('/'):'—'}</td><td data-l="Motivo">${o[2]||'—'}</td><td data-l="Valor" class="val-c">R$ ${BRL2.format(o[1])}</td></tr>`).join('');
   const msg=suggestion(r);
+  const hl=health(r);
   const filtLabel=FILTER.length===MONTHS.length?'todo o período':FILTER.map(id=>MLAB[id]).join(', ');
+  const reMot=motivoChips(tally(list.map(o=>o[2])),'re');
   // clientes mais urgentes na mesma região (CEP)
   let urgentBlock='';
   if(r.moreUrgent>0){
@@ -414,14 +466,14 @@ function detailHTML(r){
         <div class="note" style="margin-top:8px">Ordenados por prioridade de entrega (potencial de vendas + valor do pedido). Entregue estes antes de “${p.n}” se faltar caminhão.</div></div></details>`;
   }
   return `
-    <div class="d-meta-line">Pedido <b>${p.ped||'—'}</b> · Representante: <b>${p.rep}</b>${p.cidade?' · '+p.cidade:''}${p.cep?' · CEP '+p.cep:''}</div>
+    <div class="d-meta-line"><span class="hbadge hbadge-${hl.level}"><span class="hdot hdot-${hl.level}"></span>${hl.label}</span>Pedido <b>${p.ped||'—'}</b> · Representante: <b>${p.rep}</b>${p.cidade?' · '+p.cidade:''}${p.cep?' · CEP '+p.cep:''}</div>
     <div class="exp-kpis">
       <div class="ek"><div class="ek-l">Valor do pedido (pós)</div><div class="ek-v gold">R$ ${BRL2.format(p.valor)}</div></div>
       <div class="ek"><div class="ek-l">Reentregas (${filtLabel})</div><div class="ek-v ${r.nRe>=THR?'rose':''}">${NUM.format(r.nRe)} · R$ ${BRL2.format(r.reVal)}</div></div>
       <div class="ek"><div class="ek-l">Média de vendas/mês</div><div class="ek-v teal">${r.avg?'R$ '+BRL2.format(r.avg):'—'}</div></div>
     </div>
     <div class="suggest"><div class="s-h"><span class="dot"></span>Análise da entrega</div><p>${msg.text}</p><span class="s-tag ${msg.tier}">${msg.label}</span>${urgentBlock}</div>
-    ${list.length?`<div class="sec-t">Histórico de reentregas (${list.length})</div>
+    ${list.length?`<div class="sec-t">Histórico de reentregas (${list.length})</div>${reMot}
     <div class="tbl-wrap"><table style="min-width:0"><thead><tr><th>Data</th><th>Motivo</th><th>Valor</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="note" style="margin-top:8px">Sem reentregas registradas no período para este cliente.</div>'}
     ${sacBlock(p)}
     <div class="note" style="margin-top:12px">Prioridade por região de CEP (${region(p)}xxx): ${r.regSize>1?`há ${r.regSize} cliente(s) do dia nessa região; este é o ${r.regRank}º mais prioritário.`:'único cliente do dia nessa região.'}</div>`;
@@ -435,10 +487,11 @@ function sacBlock(p){
       <div class="sac-top"><span class="sac-date">${o[0]?o[0].split('-').reverse().join('/'):'—'}</span>${stTag(o[3])}</div>
       ${o[1]?`<div class="sac-mot">${o[1]}</div>`:''}
       <div class="sac-desc">${o[2]||'—'}</div></div>`).join('');
+  const sacMot=motivoChips(tally(occ.map(o=>o[1])),'sac');
   return `<details class="sac"><summary>
       <span class="sac-sum-l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>SAC — histórico de ocorrências (${occ.length})</span>
       <svg class="sac-cr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></summary>
-    <div class="sac-body">${rows}</div></details>`;
+    <div class="sac-body">${sacMot}${rows}</div></details>`;
 }
 
 /* ---- análise (combina potencial + reentregas + prioridade por CEP) ---- */
@@ -597,6 +650,22 @@ async function importXLSX(file){
 }
 function findSheet(wb,name){ const n=name.toLowerCase(); return wb.SheetNames.find(s=>s.toLowerCase()===n)||wb.SheetNames.find(s=>s.toLowerCase().includes(n)); }
 
+function monthLbl(mid){ const ML={'01':'Jan','02':'Fev','03':'Mar','04':'Abr','05':'Mai','06':'Jun','07':'Jul','08':'Ago','09':'Set','10':'Out','11':'Nov','12':'Dez'}; return ML[mid.slice(5,7)]+'/'+mid.slice(0,4); }
+function updNagRender(){
+  const el=document.getElementById('updNag'); if(!el) return;
+  const fatLast=FATBASE.fmonths[FATBASE.fmonths.length-1];
+  let sacMax='';
+  try{ for(const k in SACBASE.SAC){ for(const o of SACBASE.SAC[k]){ if(o[0]&&o[0]>sacMax) sacMax=o[0]; } } }catch(e){}
+  const fatLabel=monthLbl(fatLast), sacLabel=sacMax?monthLbl(sacMax.slice(0,7)):'—';
+  const now=new Date(); const monthsBehind=(now.getFullYear()-(+fatLast.slice(0,4)))*12+(now.getMonth()+1-(+fatLast.slice(5,7)));
+  let cls='',txt='';
+  if(monthsBehind>=2){ cls='warn'; txt=`Base de <b>faturamento</b> parada em ${fatLabel} (${monthsBehind} meses atrás) e <b>SAC</b> até ${sacLabel} — peça a atualização para as análises não ficarem defasadas.`; }
+  else if(monthsBehind>=1){ cls='warn'; txt=`Virou o mês — base de <b>faturamento</b> até ${fatLabel} e <b>SAC</b> até ${sacLabel}. Vale pedir a atualização da base.`; }
+  else { txt=`Base de <b>faturamento</b> até ${fatLabel} · <b>SAC</b> até ${sacLabel}. Lembre de pedir a atualização ao virar o mês.`; }
+  el.className='upd-nag '+cls;
+  el.innerHTML=`<span class="nag-dot"></span><span class="nag-tx">${txt}</span>`;
+}
+updNagRender();
 render();
 </script>
 </body>
