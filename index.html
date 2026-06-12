@@ -478,30 +478,54 @@ async function importXLSX(file){
     const posRows=XLSX.utils.sheet_to_json(shPos,{header:1,raw:true});
     const reRows= shRe? XLSX.utils.sheet_to_json(shRe,{header:1,raw:true}) : [];
 
-    // reentregas: F=5 cliente, E=4 data, H=7 valor, K=10 motivo (0-based)
+    // ---- localizar colunas pelo NOME do cabeçalho (em vez da posição) ----
+    const normHdr=s=>(s==null?'':String(s)).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+    function headerRow(rows){ for(let i=0;i<Math.min(8,rows.length);i++){ if(rows[i]&&rows[i].some(c=>normHdr(c)==='cliente')) return i; } return 0; }
+    function colFinder(hdr){ return (exacts,contains,fallback)=>{
+      for(const e of exacts){ const i=hdr.indexOf(e); if(i>=0) return i; }
+      if(contains) for(let i=0;i<hdr.length;i++){ if(hdr[i]&&contains.some(c=>hdr[i].includes(c))) return i; }
+      return (fallback!=null?fallback:-1);
+    };}
+
+    // pós
+    const pHr=headerRow(posRows); const pHdr=(posRows[pHr]||[]).map(normHdr); const pf=colFinder(pHdr);
+    const cP_cli=pf(['cliente'],['cliente'],8);
+    const cP_ped=pf(['pedido'],['pedido'],3);
+    const cP_val=pf(['valor'],['valor'],9);
+    const cP_rep=pf(['representante'],['representante','repres'],18);
+    const cP_cid=pf(['cidade'],['cidade','municipio'],49);
+    const cP_cep=pf(['cep'],['cep'],50);
+    // reentregas
+    const rHr=shRe?headerRow(reRows):0; const rHdr=shRe?(reRows[rHr]||[]).map(normHdr):[]; const rf=colFinder(rHdr);
+    const cR_cli=rf(['cliente'],['cliente'],5);
+    const cR_dat=rf(['emissao','data'],['emiss','data'],4);
+    const cR_val=rf(['valor'],['valor'],7);
+    const cR_mot=rf(['motivo reentrega','motivo'],['motivo'],10);
+
+    // reentregas
     const reent={};
-    reRows.forEach(row=>{
-      const cli=row[5]; if(!cli||typeof cli!=='string') return;
+    reRows.forEach((row,idx)=>{ if(idx<=rHr) return;
+      const cli=row[cR_cli]; if(!cli||typeof cli!=='string') return;
       const k=nclientJS(cli); if(!k) return;
-      const diso=isoFrom(row[4]); const v=toNum(row[7])||0; const mot=row[10]?String(row[10]).trim():'';
+      const diso=isoFrom(row[cR_dat]); const v=toNum(row[cR_val])||0; const mot=row[cR_mot]?String(row[cR_mot]).trim():'';
       (reent[k]=reent[k]||[]).push([diso, Math.round(v*100)/100, mot]);
     });
-    // pós: I=8 cliente, J=9 valor, S=18 rep, AX=49 cidade, AY=50 cep
+    // pós
     const pos=[]; let match=0;
-    posRows.forEach(row=>{
-      const cli=row[8]; const val=toNum(row[9]);
+    posRows.forEach((row,idx)=>{ if(idx<=pHr) return;
+      const cli=row[cP_cli]; const val=toNum(row[cP_val]);
       if(!cli||typeof cli!=='string'||cli.trim().toLowerCase()==='cliente'||isNaN(val)) return;
       const k=nclientJS(cli); if(!k) return;
       const bk=resolveJS(k); if(bk) match++;
-      const rep=(bk?FATBASE.REP[bk]:null)||(row[18]?String(row[18]).trim():'—');
+      const rep=(bk?FATBASE.REP[bk]:null)||(row[cP_rep]?String(row[cP_rep]).trim():'—');
       const name=tcJS(String(cli).replace(/\s+\d{3,}$/,'').replace(/^\s*\d[\d.\-/]*\s+/,'').trim());
       const fo=[];
       if(bk){ FATBASE.fmonths.forEach((mid,i)=>{ if(FATBASE.FAT[bk][i]>0) fo.push([mid, Math.round(FATBASE.FAT[bk][i]*100)/100]); }); }
-      const cep=row[50]?String(row[50]).trim():''; const cepd=cep.replace(/\D/g,'');
-      const ped=row[3]?String(row[3]).trim():'';
-      pos.push({n:name,k:k,bk:bk||'',valor:Math.round(val*100)/100,cidade:row[49]?tcJS(String(row[49])):'',cep:cep,cepd:cepd,rep:rep,ped:ped,fo:fo,re:reent[k]||[]});
+      const cep=row[cP_cep]?String(row[cP_cep]).trim():''; const cepd=cep.replace(/\D/g,'');
+      const ped=row[cP_ped]?String(row[cP_ped]).trim():'';
+      pos.push({n:name,k:k,bk:bk||'',valor:Math.round(val*100)/100,cidade:row[cP_cid]?tcJS(String(row[cP_cid])):'',cep:cep,cepd:cepd,rep:rep,ped:ped,fo:fo,re:reent[k]||[]});
     });
-    if(!pos.length) throw new Error('nenhum cliente lido na aba pós');
+    if(!pos.length) throw new Error('nenhum cliente lido na aba pós (verifique se há uma coluna "Cliente")');
     // meses
     const rmset=new Set();
     pos.forEach(p=>p.re.forEach(o=>{ if(o[0]) rmset.add(o[0].slice(0,7)); }));
