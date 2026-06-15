@@ -194,6 +194,17 @@ body.ds-sac .seg,body.ds-sac .controls{display:none}
 .an-nums{flex:0 0 auto;text-align:right;display:flex;flex-direction:column;gap:2px}
 .an-q{font-family:'Fraunces';font-size:16px;color:var(--rose)}
 .an-v{font-size:11px;color:var(--muted)}
+.an-q:not(.pri){font-size:13px;color:var(--muted);font-family:'Manrope';font-weight:700}
+.an-v.pri{font-size:14px;color:var(--gold);font-family:'Fraunces'}
+/* card destaque */
+.kpi-dest{display:flex;flex-direction:column;gap:9px}
+.dest-row{display:flex;align-items:flex-start;gap:9px}
+.dest-tag{flex:0 0 auto;font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:3px 7px;border-radius:6px;margin-top:2px}
+.dest-tag.mot{background:rgba(224,139,122,.18);color:#f0a99a}
+.dest-tag.rota{background:rgba(91,183,168,.18);color:var(--teal)}
+.dest-info{min-width:0}
+.dest-nm{font-weight:700;font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dest-sub{font-size:10.5px;color:var(--muted2);margin-top:1px}
 .an-cr{width:16px;height:16px;flex:0 0 auto;color:var(--muted2);transition:transform .25s cubic-bezier(.2,.7,.2,1)}
 .an-item.open .an-cr{transform:rotate(180deg)}
 .an-cross{padding:4px 15px 15px;animation:expIn .26s cubic-bezier(.2,.7,.2,1)}
@@ -634,6 +645,7 @@ function toggleRep(rep, ev){ if(ev) ev.stopPropagation(); if(OPENR.has(rep)) OPE
 
 /* ---- aba Análise reentregas ---- */
 function setAMode(m){ if(AMODE===m) return; AMODE=m; AOPEN.clear(); renderAnalise(); }
+function setASort(s){ if(ASORT===s) return; ASORT=s; renderAnalise(); }
 function aSetMonth(id){
   aInit(); const all=(RM.months||[]).map(m=>m.id);
   if(id==='all'){ AFILTER=all.slice(); }
@@ -652,32 +664,40 @@ function renderAnalise(){
   const rows=aAgg();
   const totQ=rows.reduce((a,r)=>a+r.qtd,0), totV=rows.reduce((a,r)=>a+r.val,0);
   const nMot=Object.keys(RM.motAll).length, nRota=Object.keys(RM.rotaAll).length;
+  const topMot=aAggDim('mot')[0], topRota=aAggDim('rota')[0];
+  const sortWord=ASORT==='val'?'valor':'quantidade';
   document.getElementById('kpis').innerHTML=`
     <div class="kpi"><div class="k-lbl">Reentregas no período</div><div class="k-val rose">${NUM.format(totQ)}</div><div class="k-sub">R$ ${BRL2.format(totV)}</div></div>
     <div class="kpi"><div class="k-lbl">Motoristas</div><div class="k-val">${NUM.format(nMot)}</div></div>
-    <div class="kpi"><div class="k-lbl">Rotas</div><div class="k-val teal">${NUM.format(nRota)}</div></div>`;
+    <div class="kpi"><div class="k-lbl">Rotas</div><div class="k-val teal">${NUM.format(nRota)}</div></div>
+    <div class="kpi kpi-dest"><div class="k-lbl">Destaque · por ${sortWord}</div>
+      <div class="dest-row"><span class="dest-tag mot">Motorista</span><div class="dest-info"><div class="dest-nm">${topMot?topMot.k:'—'}</div><div class="dest-sub">${topMot?NUM.format(topMot.qtd)+' reent · R$ '+BRL2.format(topMot.val):''}</div></div></div>
+      <div class="dest-row"><span class="dest-tag rota">Rota</span><div class="dest-info"><div class="dest-nm">${topRota?topRota.k:'—'}</div><div class="dest-sub">${topRota?NUM.format(topRota.qtd)+' reent · R$ '+BRL2.format(topRota.val):''}</div></div></div>
+    </div>`;
   const chips=`<button class="chip all ${AFILTER.length===all.length?'on':''}" onclick="aSetMonth('all')">Todos</button>`+
     RM.months.map(m=>`<button class="chip ${AFILTER.includes(m.id)?'on':''}" onclick="aSetMonth('${m.id}')">${m.label}</button>`).join('');
-  const maxQ=rows.length?rows[0].qtd:1;
+  const maxMetric=rows.length?(ASORT==='val'?rows[0].val:rows[0].qtd):1;
   const otherLbl=AMODE==='mot'?'rotas':'motoristas';
   const bars=rows.map((r,i)=>{
     const op=AOPEN.has(r.k);
+    const metric=ASORT==='val'?r.val:r.qtd;
     const cross=op?aCross(r.k):[];
     const crossH=op?`<div class="an-cross"><div class="an-cross-h">${AMODE==='mot'?'Rotas deste motorista':'Motoristas desta rota'} (${cross.length})</div>${cross.map(c=>`<div class="an-cross-row"><span class="an-cross-n">${c.k}</span><span class="an-cross-q">${NUM.format(c.qtd)}</span><span class="an-cross-v">R$ ${BRL2.format(c.val)}</span></div>`).join('')}<div class="note" style="margin-top:6px">Cruzamento no período total da base.</div></div>`:'';
     return `<div class="an-item ${op?'open':''}">
       <button class="an-row" onclick="aToggle('${r.k.replace(/'/g,"\\'")}')">
         <span class="an-pos">${i+1}º</span>
-        <span class="an-main"><span class="an-name">${r.k}</span><span class="an-bar"><span class="an-fill" style="width:${Math.max(4,r.qtd/maxQ*100)}%"></span></span></span>
-        <span class="an-nums"><span class="an-q">${NUM.format(r.qtd)}</span><span class="an-v">R$ ${BRL2.format(r.val)}</span></span>
+        <span class="an-main"><span class="an-name">${r.k}</span><span class="an-bar"><span class="an-fill" style="width:${Math.max(4,metric/maxMetric*100)}%"></span></span></span>
+        <span class="an-nums"><span class="an-q ${ASORT==='qtd'?'pri':''}">${NUM.format(r.qtd)}</span><span class="an-v ${ASORT==='val'?'pri':''}">R$ ${BRL2.format(r.val)}</span></span>
         <svg class="an-cr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
       </button>${crossH}</div>`;
   }).join('');
   box.innerHTML=`<div class="an-wrap">
     <div class="an-controls">
       <div class="seg an-seg"><button class="seg-b ${AMODE==='mot'?'on':''}" onclick="setAMode('mot')">Por motorista</button><button class="seg-b ${AMODE==='rota'?'on':''}" onclick="setAMode('rota')">Por rota</button></div>
+      <div class="seg an-seg"><button class="seg-b ${ASORT==='qtd'?'on':''}" onclick="setASort('qtd')">Qtd</button><button class="seg-b ${ASORT==='val'?'on':''}" onclick="setASort('val')">R$</button></div>
       <div class="chips an-chips">${chips}</div>
     </div>
-    <div class="an-hint">Ranking de ${AMODE==='mot'?'motoristas (transportador)':'rotas'} por reentregas. Toque para ver ${otherLbl} relacionados — um motorista pode rodar várias rotas.</div>
+    <div class="an-hint">Ranking de ${AMODE==='mot'?'motoristas (transportador)':'rotas'} por ${sortWord} de reentregas. Toque para ver ${otherLbl} relacionados — um motorista pode rodar várias rotas.</div>
     <div class="an-list">${bars||'<div class="muted-row">Sem dados no período.</div>'}</div>
   </div>`;
 }
@@ -867,14 +887,17 @@ function critClients(){
 }
 let SAC_SEL=null;
 /* ---- análise de reentregas (rota x motorista) ---- */
-let AMODE='mot'; let AFILTER=null; const AOPEN=new Set();
+let AMODE='mot'; let AFILTER=null; let ASORT='qtd'; const AOPEN=new Set();
 function aInit(){ if(AFILTER===null) AFILTER=((typeof RM!=='undefined'&&RM.months)||[]).map(m=>m.id); }
-function aAgg(){
+function aAggDim(dim){
   aInit(); const set=new Set(AFILTER);
-  const src=AMODE==='mot'?RM.mot:RM.rota; const agg={};
+  const src=dim==='mot'?RM.mot:RM.rota; const agg={};
   Object.keys(src).forEach(mid=>{ if(!set.has(mid)) return; const d=src[mid]; for(const k in d){ const a=agg[k]||(agg[k]=[0,0]); a[0]+=d[k][0]; a[1]+=d[k][1]; } });
-  return Object.entries(agg).map(([k,v])=>({k,qtd:v[0],val:v[1]})).sort((a,b)=>b.qtd-a.qtd);
+  let arr=Object.entries(agg).map(([k,v])=>({k,qtd:v[0],val:v[1]}));
+  arr.sort((a,b)=> ASORT==='val'? (b.val-a.val||b.qtd-a.qtd) : (b.qtd-a.qtd||b.val-a.val));
+  return arr;
 }
+function aAgg(){ return aAggDim(AMODE); }
 function aCross(name){
   const idx=AMODE==='mot'?1:0, other=AMODE==='mot'?0:1, m={};
   RM.pair.forEach(p=>{ if(p[idx]===name){ const o=p[other]; const a=m[o]||(m[o]=[0,0]); a[0]+=p[2]; a[1]+=p[3]; } });
