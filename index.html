@@ -858,7 +858,7 @@ function nclientJS(s){
   s=s.replace(/\s+\d{3,}$/,'').trim().replace(/^\d+\s+/,'');
   return s;
 }
-const FAT_KEYS=Object.keys(FATBASE.FAT).sort();
+let FAT_KEYS=Object.keys(FATBASE.FAT).sort();
 const SAC_KEYS=(typeof SACBASE!=='undefined'&&SACBASE.SAC)?Object.keys(SACBASE.SAC).sort():[];
 const REENT_KEYS=(typeof REENTBASE!=='undefined'&&REENTBASE.RE)?Object.keys(REENTBASE.RE).sort():[];
 function resolveReKey(P){
@@ -935,6 +935,78 @@ function isoFrom(v){
 }
 function toNum(v){ if(typeof v==='number')return v; if(!v)return NaN; return parseFloat(String(v).replace(/\./g,'').replace(',','.')); }
 
+/* ===== FATURAMENTO AO VIVO — mesma leitura do painel "faturamento por cidade 1.0" =====
+   Lê a aba Faturamento publicada (pub?output=csv) e monta a base POR CLIENTE.
+   Colunas achadas pelo NOME do cabeçalho (Data, Cliente, Representante, Valor),
+   com padrão A=data · C=cliente · F=rep · G=valor. Base embutida = reserva offline. */
+const FAT_CSV_URL="https://docs.google.com/spreadsheets/d/e/2PACX-1vR66FBTOWqPYZ8mY1r-7EH9Q4uph3tHi6GP-uplRILVI0cwzGNfS0e75zgagLY_6ViUMWW1WkrODUhq/pub?output=csv";
+let FAT_LIVE=null;
+function _fnum(v){
+  if(typeof v==='number') return v;
+  let s=String(v==null?'':v).replace(/[^\d.,\-]/g,''); if(!s) return NaN;
+  if(s.indexOf(',')>=0 && s.indexOf('.')>=0) s=s.replace(/\./g,'').replace(',','.');
+  else if(s.indexOf(',')>=0) s=s.replace(',','.');
+  return parseFloat(s);
+}
+function _fmonth(v){
+  if(v==null) return '';
+  if(v instanceof Date && !isNaN(v)) return v.getFullYear()+'-'+String(v.getMonth()+1).padStart(2,'0');
+  let s=String(v).trim(), m;
+  if(m=s.match(/^(\d{4})-(\d{1,2})/)) return m[1]+'-'+m[2].padStart(2,'0');
+  if(m=s.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/)){ let y=m[3]; if(y.length==2)y='20'+y; return y+'-'+m[2].padStart(2,'0'); }
+  if(m=s.match(/^(\d{1,2})\/(\d{4})$/)) return m[2]+'-'+m[1].padStart(2,'0');
+  const MM={jan:'01',fev:'02',mar:'03',abr:'04',mai:'05',jun:'06',jul:'07',ago:'08',set:'09',out:'10',nov:'11',dez:'12'};
+  if(m=s.toLowerCase().match(/([a-z]{3})[a-z]*[^\d]*(\d{2,4})/)){ if(MM[m[1]]){ let y=m[2]; if(y.length==2)y='20'+y; return y+'-'+MM[m[1]]; } }
+  return '';
+}
+function _fparseCSV(text){
+  const rows=[]; let row=[], cur='', q=false;
+  for(let i=0;i<text.length;i++){ const ch=text[i];
+    if(q){ if(ch=='"'){ if(text[i+1]=='"'){cur+='"';i++;} else q=false; } else cur+=ch; }
+    else { if(ch=='"') q=true; else if(ch==','){ row.push(cur); cur=''; }
+      else if(ch=='\n'){ row.push(cur); rows.push(row); row=[]; cur=''; }
+      else if(ch=='\r'){} else cur+=ch; } }
+  if(cur.length||row.length){ row.push(cur); rows.push(row); }
+  return rows;
+}
+function _fcols(raw){
+  let hi=0;
+  for(let i=0;i<Math.min(raw.length,8);i++){ const low=(raw[i]||[]).map(x=>(x||'').toString().trim().toLowerCase()); if(low.includes('cliente')&&low.includes('valor')){ hi=i; break; } }
+  const head=(raw[hi]||[]).map(x=>(x||'').toString().trim().toLowerCase());
+  const find=(ns,d)=>{ for(const n of ns){ const i=head.indexOf(n); if(i>=0)return i; } return d; };
+  return { hi, data:find(['data'],0), cliente:find(['cliente'],2), rep:find(['representante','repres'],5), valor:find(['valor'],6) };
+}
+async function refreshFatFromSheet(){
+  let r;
+  try{ r=await fetch(FAT_CSV_URL+'&_t='+Date.now(),{cache:'no-store'}); }
+  catch(e){ FAT_LIVE={ok:false,msg:'sem conexão com a planilha'}; throw e; }
+  if(!r.ok){ FAT_LIVE={ok:false,msg:'HTTP '+r.status}; throw new Error('HTTP '+r.status); }
+  const raw=_fparseCSV(await r.text());
+  if(raw.length<2){ FAT_LIVE={ok:false,msg:'planilha vazia'}; throw new Error('planilha vazia'); }
+  const c=_fcols(raw);
+  const FAT={}, NAME={}, REP={}, N={}, mset=new Set(); let nrows=0;
+  for(let i=c.hi+1;i<raw.length;i++){
+    const row=raw[i]; if(!row||row.length<3) continue;
+    const cliRaw=row[c.cliente]; const val=_fnum(row[c.valor]); const mk=_fmonth(row[c.data]);
+    if(!cliRaw||!String(cliRaw).trim()||isNaN(val)||!mk) continue;
+    const k=nclientJS(cliRaw); if(!k) continue;
+    mset.add(mk); nrows++;
+    (FAT[k]=FAT[k]||{})[mk]=(FAT[k][mk]||0)+val;
+    (N[k]=N[k]||{})[mk]=(N[k][mk]||0)+1;
+    if(!NAME[k]) NAME[k]=tcJS(String(cliRaw).replace(/\s+\d{3,}$/,'').replace(/^\s*\d[\d.\-/]*\s+/,'').trim());
+    const rp=(c.rep>=0&&row[c.rep])?String(row[c.rep]).trim():''; if(rp&&!REP[k]) REP[k]=rp;
+  }
+  if(!nrows){ FAT_LIVE={ok:false,msg:'nenhuma linha válida (confira a aba Faturamento)'}; throw new Error('sem linhas válidas'); }
+  const months=[...mset].sort(), FA={}, FN={};
+  Object.keys(FAT).forEach(k=>{ FA[k]=months.map(mm=>Math.round((FAT[k][mm]||0)*100)/100); FN[k]=months.map(mm=>(N[k][mm]||0)); });
+  FATBASE.fmonths=months; FATBASE.FAT=FA; FATBASE.FATN=FN;
+  FATBASE.NAME=Object.assign({}, FATBASE.NAME||{}, NAME);
+  FATBASE.REP=Object.assign({}, FATBASE.REP||{}, REP);
+  FAT_KEYS=Object.keys(FATBASE.FAT).sort();
+  FAT_LIVE={ok:true,last:months[months.length-1],clients:Object.keys(FA).length};
+  return FAT_LIVE;
+}
+
 async function importXLSX(file){
   if(!file) return;
   const lab=document.getElementById('impLabel'), st=document.getElementById('updSt');
@@ -943,6 +1015,7 @@ async function importXLSX(file){
   if(st){ st.className='upd-st'; st.textContent='Lendo planilha…'; }
   if(eoErr) eoErr.textContent='';
   try{
+    try{ if(st){st.className='upd-st';st.textContent='Atualizando faturamento da planilha…';} await refreshFatFromSheet(); }catch(_e){}
     if(typeof XLSX==='undefined') throw new Error('biblioteca de leitura não carregou (precisa de internet)');
     const buf=await file.arrayBuffer();
     const wb=XLSX.read(buf,{cellDates:true});
@@ -1060,21 +1133,14 @@ function reentLastRender(){
 function monthLbl(mid){ const ML={'01':'Jan','02':'Fev','03':'Mar','04':'Abr','05':'Mai','06':'Jun','07':'Jul','08':'Ago','09':'Set','10':'Out','11':'Nov','12':'Dez'}; return ML[mid.slice(5,7)]+'/'+mid.slice(0,4); }
 function updNagRender(){
   const el=document.getElementById('updNag'); if(!el) return;
-  const fatLast=FATBASE.fmonths[FATBASE.fmonths.length-1];
-  let sacMax='';
-  try{ for(const k in SACBASE.SAC){ for(const o of SACBASE.SAC[k]){ if(o[0]&&o[0]>sacMax) sacMax=o[0]; } } }catch(e){}
-  const fatLabel=monthLbl(fatLast), sacLabel=sacMax?monthLbl(sacMax.slice(0,7)):'—';
-  const now=new Date(); const monthsBehind=(now.getFullYear()-(+fatLast.slice(0,4)))*12+(now.getMonth()+1-(+fatLast.slice(5,7)));
-  let cls='',txt='';
-  if(monthsBehind>=2){ cls='warn'; txt=`Base de <b>faturamento</b> parada em ${fatLabel} (${monthsBehind} meses atrás) e <b>SAC</b> até ${sacLabel} — peça a atualização para as análises não ficarem defasadas.`; }
-  else if(monthsBehind>=1){ cls='warn'; txt=`Virou o mês — base de <b>faturamento</b> até ${fatLabel} e <b>SAC</b> até ${sacLabel}. Vale pedir a atualização da base.`; }
-  else { txt=`Base de <b>faturamento</b> até ${fatLabel} · <b>SAC</b> até ${sacLabel}. Lembre de pedir a atualização ao virar o mês.`; }
-  el.className='upd-nag '+cls;
-  el.innerHTML=`<span class="nag-dot"></span><span class="nag-tx">${txt}</span>`;
+  el.className='upd-nag'; el.style.display='none'; el.innerHTML='';
+  try{ if(typeof FAT_LIVE!=='undefined'&&FAT_LIVE) console.log('[faturamento]', FAT_LIVE.ok?('lido ate '+FAT_LIVE.last+' · '+FAT_LIVE.clients+' clientes'):('falhou: '+FAT_LIVE.msg)); }catch(e){}
 }
 updNagRender();
 reentLastRender();
 render();
+/* faturamento ao vivo no carregamento — atualiza o aviso e a base sem travar a tela */
+refreshFatFromSheet().then(r=>{ if(r){ updNagRender(); render(); reentLastRender(); } }).catch(()=>{});
 </script>
 </body>
 </html>
